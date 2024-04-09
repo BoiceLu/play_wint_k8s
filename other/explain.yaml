@@ -1,0 +1,172 @@
+# prometheus.yaml
+apiVersion: apps/v1 #k8sAPI版本
+kind: StatefulSet #部屬資源種類-有狀態set 一個主pod 其他為副本
+metadata: #基本資料
+  name: prometheus #名稱
+spec: #部屬規格
+  selector: #選擇器
+    matchLabels: #有matchLables跟matchExpressions兩種
+      app: prometheus #matchLabel的key&value
+  serviceName: prometheus-service #Statefulset指定的service
+  replicas: 1 #副本數量
+  template: #範本
+    metadata: #範本的基本資料
+      labels: #標籤
+        app: prometheus #通常會給標籤讓部屬規格中的選擇器選擇
+    spec: #範本規格
+      containers: #容器
+        - name: prometheus #名稱
+          image: prom/prometheus:latest #鏡像版本
+          ports: #埠
+            - containerPort: 9090 #容器使用的埠
+          args: #容器使用的參數
+            - "--config.file=/etc/prometheus/prometheus.yml" #設定檔位置
+            - "--web.enable-lifecycle" #熱更新 使用 http://prometheus-service:9090/-/reload
+          volumeMounts: #將pod上的volume掛載到容器上
+            - name: config-volume
+              mountPath: /etc/prometheus
+            - name: token-volume
+              mountPath: /etc/prometheus/secret
+            - name: prometheus-data
+              mountPath: /prometheus
+      volumes: #提供此pod使用的volume
+        - name: config-volume
+          configMap:
+            name: prometheus-config
+        - name: token-volume
+          secret:
+            secretName: prom-api-user-secret
+  volumeClaimTemplates: #Statefulset使用的volume宣告範本 可以為每個副本都創建volume
+  - metadata:
+      name: prometheus-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ] #訪問模式 有 節點讀寫 所有只讀 所有只寫 單pod讀寫
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1 #版本
+kind: Service #資源種類 Service類為抽象連線規則 類似於虛擬網卡的角色 但是介於pod與外部(Node、外部網路)之間
+metadata: #基本資料
+  name: prometheus-service #資源名稱
+  labels: #標籤
+    app: prometheus #給予此資源的標籤
+spec: #規格
+  type: LoadBalancer #LB模式需有一個外部IP 直接連通pod
+  selector: #選擇器 選擇service要連接的pod
+    app: prometheus #選擇 app: prometheus 的pod
+  ports: #Service Port設定
+    - port: 9090 #Service開放的port
+      targetPort: 9090 #pod上的port
+---
+## kube-state-metrics
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/version: 2.10.0
+  name: kube-state-metrics
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/name: kube-state-metrics
+        app.kubernetes.io/version: 2.10.0
+    spec:
+      automountServiceAccountToken: true
+      containers:
+      - image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.10.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          timeoutSeconds: 5
+        name: kube-state-metrics
+        ports:
+        - containerPort: 8080
+          name: http-metrics
+        - containerPort: 8081
+          name: telemetry
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8081
+          initialDelaySeconds: 5
+          timeoutSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          seccompProfile:
+            type: RuntimeDefault
+      serviceAccountName: kube-state-metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/version: 2.10.0
+  name: kube-state-metrics
+  namespace: kube-system
+spec:
+  clusterIP: None
+  ports:
+  - name: http-metrics
+    port: 8080
+    targetPort: http-metrics
+  - name: telemetry
+    port: 8081
+    targetPort: telemetry
+  selector:
+    app.kubernetes.io/name: kube-state-metrics
+---
+## node-exporter
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  labels:
+    app: node-exporter
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:latest
+          ports:
+            - containerPort: 9100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: kube-system
+spec:
+  type: LoadBalancer
+  selector:
+    app: node-exporter
+  ports:
+    - port: 9100
+      targetPort: 9100
+

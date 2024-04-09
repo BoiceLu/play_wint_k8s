@@ -1,0 +1,70 @@
+## prometheus configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['prometheus-service:9090']
+      - job_name: 'nginx'
+        static_configs:
+          - targets: ['nginx-service:80']
+      - job_name: 'grafana'
+        static_configs:
+          - targets: ['grafana-service:3000']
+      - job_name: "Kubelet"
+        kubernetes_sd_configs:
+        - role: node
+        metrics_path: "/metrics/cadvisor"
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics:8080']
+      - job_name: "kubernetes-summary"
+        metrics_path: "/node/docker-desktop"
+        static_configs:
+          - targets: ['kube-summary-exporter:9779']
+      - job_name: 'node-exporter'
+        static_configs:
+          - targets: ['node-exporter:9100']
+---
+## grafana configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources-provision
+data:
+  datasources.yaml: |-
+    apiVersion: 1
+    datasources:
+      - name: prometheus
+        type: prometheus
+        orgId: 1
+        uid: P1809F7CD0C75ACF3
+        url: http://prometheus-service:9090
+        editable: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provision
+data:
+  dashboards.yaml: |-
+    apiVersion: 1
+    providers:
+     - name: 'default'
+       orgId: 1
+       folder: ''
+       folderUid: ''
+       type: file
+       options:
+         path: /var/lib/grafana/dashboards

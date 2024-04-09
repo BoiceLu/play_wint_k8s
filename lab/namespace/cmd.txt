@@ -1,0 +1,1 @@
+kubectl create deployment cattle --image=registry.k8s.io/serve_hostname --replicas=5
